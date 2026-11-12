@@ -193,5 +193,7 @@ demo/
 ## 注意事项
 
 - 回放哈希包含**完整请求 body**：`temperature`、`max_tokens` 等参数变了就匹配不上（可用 `--on-miss proxy` 兜底）。time-sensitive 的字段（如 `user`、时间戳类参数）建议在应用端固定。
+- **多轮 agent 会话请用 `-m sequence`**：LLM 输出本身不可复现（实测 DeepSeek 两次生成的 tool_call ID 与措辞都不同），第二轮起的请求会嵌入模型上一轮的随机输出，哈希必然对不上。sequence 模式忽略请求内容按序回放，实测可完整重放 pi agent 的 read/edit/bash 多轮工具调用对话，且 agent 会真实重执行录制的工具调用（副作用可复现）。
 - 序列模式适合"按剧本跑一遍"的集成测试；哈希模式适合随机顺序的请求。
 - 录制是**追加写**：重复使用同一 `-o` 文件会累积条目；回放时同哈希多条会轮转命中。
+- Windows 提示：Git Bash 下对后台 node 进程发 `kill -INT` 常常无效，会留下占端口的僵尸服务器、甚至两个实例交错写同一 JSONL。录制/回放结束后用 `taskkill /PID <pid> /F`（或任务管理器）确认进程已退出，再进行下一步。

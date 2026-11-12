@@ -10,3 +10,4 @@
 | 06 | 端到端验证（假上游录制 → 回放比对） | done |
 | 07 | 真实 Agent 实测（pi + DeepSeek 上游） | done |
 | 08 | 录制文件按序号命名（assets 目录、多会话录制/回放） | done |
+| 09 | 复杂多工具 Agent 会话录制与 sequence 回放验证 | done |
