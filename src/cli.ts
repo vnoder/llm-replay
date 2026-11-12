@@ -23,8 +23,10 @@ const USAGE = `llm-replay — OpenAI 协议兼容的 LLM 录制/回放服务器
 record 选项:
   -u, --upstream <url>     真实上游基地址，如 https://api.openai.com（必填）
   -o, --out <path>         录制输出：以 .jsonl 结尾=具体文件；否则视为目录，
-                            自动按序号命名 NNN.jsonl（001 起，取目录最大序号+1）。
+                            自动按序号命名（001 起，取目录最大序号+1）。
                             默认 session.jsonl
+      --tag <label>        目录模式下给录制文件加任务含义后缀：NNN-<label>.jsonl
+                            （仅保留字母数字、- 和 _）
   -p, --port <port>        监听端口（默认 8787，0=随机）
       --host <host>        监听地址（默认 127.0.0.1）
       --api-key <key>      覆盖发往上游的 Authorization: Bearer <key>
@@ -53,8 +55,9 @@ inspect 选项:
   # 录制：应用把 base_url 指到 http://127.0.0.1:8787/v1
   llm-replay record -p 8787 -u https://api.openai.com -o chatgpt.jsonl --api-key sk-real-key
 
-  # 录制多个会话：-o 指向目录，自动生成 001.jsonl / 002.jsonl / …
-  llm-replay record -p 8787 -u https://api.deepseek.com -o assets --api-key sk-real-key
+  # 录制多个会话：-o 指向目录，自动按序号命名；--tag 加任务含义
+  llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag fix-calc --api-key sk-real-key
+  #   → assets/001-fix-calc.jsonl、002-<tag>.jsonl / …
   llm-replay replay -f assets          # 目录整体回放
 
   # 回放：哈希匹配 + 原始节奏
@@ -83,7 +86,7 @@ function parseArgv(argv: string[]): Args {
   const flags = new Map<string, string | boolean>();
   const valueOpts = new Set([
     'u', 'upstream', 'o', 'out', 'p', 'port', 'host', 'api-key', 'api_key',
-    'f', 'file', 'm', 'match', 'pace', 'speed', 'on-miss', 'on_miss',
+    'f', 'file', 'm', 'match', 'pace', 'speed', 'on-miss', 'on_miss', 'tag',
   ]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -165,7 +168,9 @@ async function main(): Promise<void> {
     if (typeof upstream !== 'string' || upstream.length === 0) fail(`record 需要 -u/--upstream 参数\n\n${USAGE}`);
     const outRaw = (flags.get('o') ?? flags.get('out')) ?? 'session.jsonl';
     if (typeof outRaw !== 'string' || outRaw.length === 0) fail(`无效的 -o/--out 参数`);
-    const out = await resolveRecordOut(outRaw);
+    const tagRaw = flags.get('tag');
+    const tag = typeof tagRaw === 'string' && tagRaw.length > 0 ? tagRaw : undefined;
+    const out = await resolveRecordOut(outRaw, tag);
     const port = getPort(flags, 8787);
     const host = typeof flags.get('host') === 'string' ? String(flags.get('host')) : undefined;
     const apiKey = typeof flags.get('api-key') === 'string' ? String(flags.get('api-key')) : undefined;

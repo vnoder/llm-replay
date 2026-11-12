@@ -364,3 +364,21 @@ test('resolveRecordOut 序号续接与 .jsonl 直通', async (t) => {
   assert.equal(direct, join(dir, 'sub', 'x.jsonl'));
   assert.ok(existsSync(join(dir, 'sub')));
 });
+
+test('resolveRecordOut 带 tag 命名与混合序号续接', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'llm-replay-tag-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // 空目录 + tag → 001-<tag>.jsonl，非法字符被替换
+  const withTag = await resolveRecordOut(dir, 'fix calc/bug!');
+  assert.ok(withTag.endsWith('001-fix-calc-bug.jsonl'), `应为 001-fix-calc-bug.jsonl，得到 ${withTag}`);
+
+  // 目录里已有 002-xxx.jsonl（带含义）与 005.jsonl → 续接到 006
+  writeFileSync(join(dir, '002-note-qa.jsonl'), '{}\n');
+  writeFileSync(join(dir, '005.jsonl'), '{}\n');
+  const next = await resolveRecordOut(dir);
+  assert.ok(next.endsWith('006.jsonl'), `应续接到 006，得到 ${next}`);
+  // 只计算名字不创建文件 → 下一次仍是 006，但带 tag 后缀
+  const nextTagged = await resolveRecordOut(dir, 'embed');
+  assert.ok(nextTagged.endsWith('006-embed.jsonl'), `应为 006-embed.jsonl，得到 ${nextTagged}`);
+});

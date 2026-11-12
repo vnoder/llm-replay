@@ -51,9 +51,11 @@ export class JsonlWriter {
 /**
  * 解析录制输出目标：
  * - 以 `.jsonl` 结尾 → 视为具体文件路径（父目录自动创建）
- * - 否则视为目录 → 自动取目录内最大序号 +1，命名 `NNN.jsonl`（001 起）
+ * - 否则视为目录 → 自动取目录内最大序号 +1，命名 `NNN.jsonl`；
+ *   传入 tag 时命名 `NNN-<tag>.jsonl`（任务含义，仅保留安全字符）
+ * 目录内序号识别兼容 `NNN.jsonl` 与 `NNN-含义.jsonl` 两种形式。
  */
-export async function resolveRecordOut(out: string): Promise<string> {
+export async function resolveRecordOut(out: string, tag?: string): Promise<string> {
   if (out.toLowerCase().endsWith('.jsonl')) {
     const dir = out.replace(/[/\\][^/\\]+$/, '');
     if (dir && dir !== out) await mkdir(dir, { recursive: true });
@@ -62,10 +64,12 @@ export async function resolveRecordOut(out: string): Promise<string> {
   await mkdir(out, { recursive: true });
   let max = 0;
   for (const name of await readdir(out)) {
-    const m = /^(\d+)\.jsonl$/i.exec(name);
+    const m = /^(\d+)(?:-.*)?\.jsonl$/i.exec(name);
     if (m) max = Math.max(max, Number(m[1]));
   }
-  return join(out, `${String(max + 1).padStart(3, '0')}.jsonl`);
+  const seq = String(max + 1).padStart(3, '0');
+  const safeTag = tag?.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return join(out, safeTag ? `${seq}-${safeTag}.jsonl` : `${seq}.jsonl`);
 }
 
 /**

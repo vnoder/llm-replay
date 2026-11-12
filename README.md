@@ -62,6 +62,7 @@ llm-replay record -p 8787 -u https://api.openai.com -o session.jsonl --api-key s
 |---|---|---|
 | `-u, --upstream <url>` | （必填） | 真实上游基地址，请求 path 原样拼接其后 |
 | `-o, --out <path>` | `session.jsonl` | 以 `.jsonl` 结尾＝具体文件（追加写）；否则视为**目录**，每次启动自动取目录内最大序号 +1 生成 `NNN.jsonl`（如 `001.jsonl`、`002.jsonl`），适合按会话录制多段 |
+| `--tag <label>` | | 目录模式下给录制文件加任务含义后缀：`NNN-<label>.jsonl`（如 `003-fix-calc.jsonl`；仅保留字母数字、`-`、`_`）。序号识别兼容带/不带后缀两种命名 |
 | `-p, --port <port>` | `8787` | 监听端口（`0` = 随机） |
 | `--host <host>` | `127.0.0.1` | 监听地址 |
 | `--api-key <key>` | 透传客户端的 | 覆盖发往上游的 `Authorization: Bearer <key>`。应用端随便填个假 key，真实密钥只留在录制进程 |
@@ -70,11 +71,11 @@ llm-replay record -p 8787 -u https://api.openai.com -o session.jsonl --api-key s
 #### 录制多个会话（assets 目录）
 
 ```bash
-# 每次录制一个会话，输出自动按序号命名：assets/001.jsonl、assets/002.jsonl、…
-llm-replay record -p 8787 -u https://api.deepseek.com -o assets --api-key sk-real-key
-# …跑第一个会话，Ctrl+C…
-llm-replay record -p 8787 -u https://api.deepseek.com -o assets --api-key sk-real-key
-# …跑第二个会话，Ctrl+C…
+# 每次录制一个会话，输出自动按序号命名；--tag 标注任务含义
+llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag note-qa --api-key sk-real-key
+# …跑第一个会话，Ctrl+C…        → assets/001-note-qa.jsonl
+llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag fix-calc --api-key sk-real-key
+# …跑第二个会话，Ctrl+C…        → assets/002-fix-calc.jsonl
 
 # 回放整个目录：按文件名序合并全部 *.jsonl
 #   hash 模式 → 全目录内按哈希命中

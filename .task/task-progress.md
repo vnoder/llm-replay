@@ -11,3 +11,4 @@
 | 07 | 真实 Agent 实测（pi + DeepSeek 上游） | done |
 | 08 | 录制文件按序号命名（assets 目录、多会话录制/回放） | done |
 | 09 | 复杂多工具 Agent 会话录制与 sequence 回放验证 | done |
+| 10 | 录制文件命名改为序号+任务含义（--tag） | done |
