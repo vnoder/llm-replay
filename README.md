@@ -61,11 +61,29 @@ llm-replay record -p 8787 -u https://api.openai.com -o session.jsonl --api-key s
 | 选项 | 默认 | 说明 |
 |---|---|---|
 | `-u, --upstream <url>` | （必填） | 真实上游基地址，请求 path 原样拼接其后 |
-| `-o, --out <file>` | `session.jsonl` | 录制输出 JSONL 路径（追加写，Ctrl+C 落盘） |
+| `-o, --out <path>` | `session.jsonl` | 以 `.jsonl` 结尾＝具体文件（追加写）；否则视为**目录**，每次启动自动取目录内最大序号 +1 生成 `NNN.jsonl`（如 `001.jsonl`、`002.jsonl`），适合按会话录制多段 |
 | `-p, --port <port>` | `8787` | 监听端口（`0` = 随机） |
 | `--host <host>` | `127.0.0.1` | 监听地址 |
 | `--api-key <key>` | 透传客户端的 | 覆盖发往上游的 `Authorization: Bearer <key>`。应用端随便填个假 key，真实密钥只留在录制进程 |
 | `--no-log` | | 不打印每条录制日志 |
+
+#### 录制多个会话（assets 目录）
+
+```bash
+# 每次录制一个会话，输出自动按序号命名：assets/001.jsonl、assets/002.jsonl、…
+llm-replay record -p 8787 -u https://api.deepseek.com -o assets --api-key sk-real-key
+# …跑第一个会话，Ctrl+C…
+llm-replay record -p 8787 -u https://api.deepseek.com -o assets --api-key sk-real-key
+# …跑第二个会话，Ctrl+C…
+
+# 回放整个目录：按文件名序合并全部 *.jsonl
+#   hash 模式 → 全目录内按哈希命中
+#   sequence 模式 → 跨文件按录制顺序逐条回放（001 会话跑完接 002 会话）
+llm-replay replay -p 8788 -f assets -m sequence
+llm-replay inspect -f assets
+```
+
+目录合并后条目 id 带文件前缀（如 `001/rec-000001`），日志与 `x-llm-replay` 响应头可区分来源会话。
 
 把应用的 `base_url` 指到 `http://127.0.0.1:8787/v1`，正常跑一遍业务即完成录制。`Ctrl+C` 结束，录制内容即时落盘。
 
@@ -80,7 +98,7 @@ llm-replay replay -f session.jsonl --on-miss proxy \
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
-| `-f, --file <file>` | （必填） | 录制 JSONL 文件 |
+| `-f, --file <path>` | （必填） | 录制 JSONL 文件**或目录**；目录时按文件名序合并全部 `*.jsonl` |
 | `-p, --port <port>` | `8788` | 监听端口 |
 | `--host <host>` | `127.0.0.1` | 监听地址 |
 | `-m, --match <mode>` | `hash` | `hash`：按请求哈希（method + path + 归一化 body）精确匹配；同一哈希有多条录制时按录制顺序轮转。`sequence`：忽略请求内容，按录制顺序逐条回放，放完即未命中 |
@@ -96,9 +114,10 @@ llm-replay replay -f session.jsonl --on-miss proxy \
 ### inspect
 
 ```bash
-llm-replay inspect -f session.jsonl
-# rec-000001  POST /v1/chat/completions  -> 200 sse(6 chunks, 452ms) hash=73e15b5682a3…
-# rec-000002  GET  /v1/models            -> 200 json                    hash=c1d5b359e983…
+llm-replay inspect -f session.jsonl     # 单文件
+llm-replay inspect -f assets            # 整个录制目录
+# 001/rec-000001  GET  /v1/models            -> 200 json  hash=c1d5b359e983…
+# 002/rec-000001  POST /v1/chat/completions  -> 200 json  hash=6d845f759a9e…
 ```
 
 ## 录制格式（JSONL）

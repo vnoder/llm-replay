@@ -9,3 +9,4 @@
 | 05 | CLI 入口与 README 用法说明 | done |
 | 06 | 端到端验证（假上游录制 → 回放比对） | done |
 | 07 | 真实 Agent 实测（pi + DeepSeek 上游） | done |
+| 08 | 录制文件按序号命名（assets 目录、多会话录制/回放） | done |

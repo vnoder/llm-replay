@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http, { type Server } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startRecordServer, type StartedServer } from '../src/server/record-server.js';
 import { startReplayServer } from '../src/server/replay-server.js';
-import { readJsonl } from '../src/core/jsonl.js';
+import { readJsonl, resolveRecordOut } from '../src/core/jsonl.js';
 
 // ---------------------------------------------------------------- 假上游
 
@@ -298,4 +298,69 @@ test('录制 -> 回放 全链路', async (t) => {
   await req(prox.port, '/v1/models');
   assert.equal(upstream.hits.get('models'), hitBefore);
   await prox.close();
+});
+
+test('多会话按序号录制到目录 + 目录整体回放', async (t) => {
+  const upstream = await startFakeUpstream();
+  t.after(() => upstream.close());
+  const dir = mkdtempSync(join(tmpdir(), 'llm-replay-dir-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const assets = join(dir, 'assets');
+  const auth = { authorization: `Bearer ${REAL_KEY}`, 'content-type': 'application/json' };
+
+  // 会话 1：录制 models
+  const f1 = await resolveRecordOut(assets);
+  assert.ok(f1.endsWith(join('assets', '001.jsonl')), `首个序号文件应为 001.jsonl，得到 ${f1}`);
+  const rec1 = await startRecordServer({ port: 0, upstream: `http://127.0.0.1:${upstream.port}`, file: f1, log: false });
+  t.after(() => rec1.close());
+  await (await req(rec1.port, '/v1/models', { headers: auth })).json();
+  await rec1.close();
+
+  // 会话 2：录制 embeddings
+  const f2 = await resolveRecordOut(assets);
+  assert.ok(f2.endsWith('002.jsonl'), `第二个序号文件应为 002.jsonl，得到 ${f2}`);
+  const rec2 = await startRecordServer({ port: 0, upstream: `http://127.0.0.1:${upstream.port}`, file: f2, log: false });
+  t.after(() => rec2.close());
+  await (await req(rec2.port, '/v1/embeddings', { method: 'POST', headers: auth, body: JSON.stringify({ model: 'e', input: 'x' }) })).json();
+  await rec2.close();
+
+  // 目录合并读取：两个文件按名序加载，id 带文件前缀
+  const entries = await readJsonl(assets);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].id.startsWith('001/'), true);
+  assert.equal(entries[0].request.path, '/v1/models');
+  assert.equal(entries[1].id.startsWith('002/'), true);
+  assert.equal(entries[1].request.path, '/v1/embeddings');
+
+  // 目录回放：sequence 跨文件按序（先 models 后 embeddings）
+  const seq = await startReplayServer({ port: 0, file: assets, match: 'sequence', pace: 'instant', log: false });
+  t.after(() => seq.close());
+  const r1 = await req(seq.port, '/anything');
+  assert.equal((await jsonOf(r1)).data[0].id, 'gpt-test');
+  const r2 = await req(seq.port, '/anything', { method: 'POST', body: 'x' });
+  assert.deepEqual((await jsonOf(r2)).data[0].embedding, [0.1, 0.2]);
+  assert.equal(r2.headers.get('x-llm-replay'), 'hit:002/rec-000001');
+  await seq.close();
+
+  // 目录回放：hash 模式同样可用
+  const hash = await startReplayServer({ port: 0, file: assets, match: 'hash', log: false });
+  t.after(() => hash.close());
+  const hm = await req(hash.port, '/v1/models');
+  assert.equal((await jsonOf(hm)).data[0].id, 'gpt-test');
+  await hash.close();
+});
+
+test('resolveRecordOut 序号续接与 .jsonl 直通', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'llm-replay-seq-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // 目录里已有 007.jsonl → 下一个应是 008
+  writeFileSync(join(dir, '007.jsonl'), '{}\n');
+  const next = await resolveRecordOut(dir);
+  assert.ok(next.endsWith('008.jsonl'), `应续接到 008，得到 ${next}`);
+
+  // .jsonl 结尾直通不改名（父目录自动创建）
+  const direct = await resolveRecordOut(join(dir, 'sub', 'x.jsonl'));
+  assert.equal(direct, join(dir, 'sub', 'x.jsonl'));
+  assert.ok(existsSync(join(dir, 'sub')));
 });

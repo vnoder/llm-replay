@@ -1,5 +1,6 @@
 import { createWriteStream } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { mkdir, open, readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { RecordEntry } from './types.js';
 
 /**
@@ -48,9 +49,50 @@ export class JsonlWriter {
 }
 
 /**
- * 读入整个 JSONL 文件，返回按行序的 RecordEntry 数组（跳过空行与坏行并告警）。
+ * 解析录制输出目标：
+ * - 以 `.jsonl` 结尾 → 视为具体文件路径（父目录自动创建）
+ * - 否则视为目录 → 自动取目录内最大序号 +1，命名 `NNN.jsonl`（001 起）
  */
-export async function readJsonl(file: string): Promise<RecordEntry[]> {
+export async function resolveRecordOut(out: string): Promise<string> {
+  if (out.toLowerCase().endsWith('.jsonl')) {
+    const dir = out.replace(/[/\\][^/\\]+$/, '');
+    if (dir && dir !== out) await mkdir(dir, { recursive: true });
+    return out;
+  }
+  await mkdir(out, { recursive: true });
+  let max = 0;
+  for (const name of await readdir(out)) {
+    const m = /^(\d+)\.jsonl$/i.exec(name);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return join(out, `${String(max + 1).padStart(3, '0')}.jsonl`);
+}
+
+/**
+ * 读入 JSONL：path 为文件则读该文件，为目录则按文件名序合并读取全部 `*.jsonl`。
+ */
+export async function readJsonl(path: string): Promise<RecordEntry[]> {
+  const st = await stat(path).catch(() => {
+    throw new Error(`录制文件不存在: ${path}`);
+  });
+  if (!st.isDirectory()) return readJsonlFile(path);
+
+  const files = (await readdir(path)).filter((f) => f.toLowerCase().endsWith('.jsonl')).sort();
+  if (files.length === 0) throw new Error(`录制目录为空（没有 *.jsonl）: ${path}`);
+  const all: RecordEntry[] = [];
+  for (const f of files) {
+    // 合并时给 id 加文件名前缀（各文件内部 id 均从 rec-000001 起，避免重复）
+    const prefix = f.replace(/\.jsonl$/i, '') + '/';
+    all.push(...(await readJsonlFile(join(path, f), prefix)));
+  }
+  return all;
+}
+
+/**
+ * 读入单个 JSONL 文件，返回按行序的 RecordEntry 数组（跳过空行与坏行并告警）。
+ * idPrefix 用于目录合并时区分来源文件。
+ */
+async function readJsonlFile(file: string, idPrefix = ''): Promise<RecordEntry[]> {
   const handle = await open(file, 'r');
   try {
     const entries: RecordEntry[] = [];
@@ -66,7 +108,9 @@ export async function readJsonl(file: string): Promise<RecordEntry[]> {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          entries.push(JSON.parse(trimmed) as RecordEntry);
+          const e = JSON.parse(trimmed) as RecordEntry;
+          if (idPrefix) e.id = idPrefix + e.id;
+          entries.push(e);
         } catch {
           console.warn(`[llm-replay] 跳过无法解析的行: ${trimmed.slice(0, 80)}...`);
         }
@@ -75,7 +119,9 @@ export async function readJsonl(file: string): Promise<RecordEntry[]> {
     const tail = leftover.trim();
     if (tail) {
       try {
-        entries.push(JSON.parse(tail) as RecordEntry);
+        const e = JSON.parse(tail) as RecordEntry;
+        if (idPrefix) e.id = idPrefix + e.id;
+        entries.push(e);
       } catch {
         console.warn(`[llm-replay] 跳过无法解析的末行`);
       }

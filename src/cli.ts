@@ -7,10 +7,10 @@
  *                      [--speed 2] [--on-miss 404|proxy] [-u URL] [--api-key KEY]
  *   llm-replay inspect -f session.jsonl
  */
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { startRecordServer } from './server/record-server.js';
 import { startReplayServer } from './server/replay-server.js';
-import { readJsonl } from './core/jsonl.js';
+import { readJsonl, resolveRecordOut } from './core/jsonl.js';
 import type { MatchMode, OnMissMode, PaceMode } from './core/types.js';
 
 const USAGE = `llm-replay — OpenAI 协议兼容的 LLM 录制/回放服务器
@@ -22,7 +22,9 @@ const USAGE = `llm-replay — OpenAI 协议兼容的 LLM 录制/回放服务器
 
 record 选项:
   -u, --upstream <url>     真实上游基地址，如 https://api.openai.com（必填）
-  -o, --out <file>         录制输出 JSONL 路径（默认 session.jsonl）
+  -o, --out <path>         录制输出：以 .jsonl 结尾=具体文件；否则视为目录，
+                            自动按序号命名 NNN.jsonl（001 起，取目录最大序号+1）。
+                            默认 session.jsonl
   -p, --port <port>        监听端口（默认 8787，0=随机）
       --host <host>        监听地址（默认 127.0.0.1）
       --api-key <key>      覆盖发往上游的 Authorization: Bearer <key>
@@ -30,7 +32,8 @@ record 选项:
       --no-log             不打印每条录制日志
 
 replay 选项:
-  -f, --file <file>        录制 JSONL 文件（必填）
+  -f, --file <path>        录制 JSONL 文件或目录（必填）。目录时按文件名序
+                            合并全部 *.jsonl（sequence 模式跨文件按序回放）
   -p, --port <port>        监听端口（默认 8788，0=随机）
       --host <host>        监听地址（默认 127.0.0.1）
   -m, --match <mode>       匹配模式：hash=按请求哈希精确匹配（默认，同哈希多条
@@ -49,6 +52,10 @@ inspect 选项:
 示例:
   # 录制：应用把 base_url 指到 http://127.0.0.1:8787/v1
   llm-replay record -p 8787 -u https://api.openai.com -o chatgpt.jsonl --api-key sk-real-key
+
+  # 录制多个会话：-o 指向目录，自动生成 001.jsonl / 002.jsonl / …
+  llm-replay record -p 8787 -u https://api.deepseek.com -o assets --api-key sk-real-key
+  llm-replay replay -f assets          # 目录整体回放
 
   # 回放：哈希匹配 + 原始节奏
   llm-replay replay -f chatgpt.jsonl -p 8788
@@ -158,7 +165,7 @@ async function main(): Promise<void> {
     if (typeof upstream !== 'string' || upstream.length === 0) fail(`record 需要 -u/--upstream 参数\n\n${USAGE}`);
     const outRaw = (flags.get('o') ?? flags.get('out')) ?? 'session.jsonl';
     if (typeof outRaw !== 'string' || outRaw.length === 0) fail(`无效的 -o/--out 参数`);
-    const out = outRaw;
+    const out = await resolveRecordOut(outRaw);
     const port = getPort(flags, 8787);
     const host = typeof flags.get('host') === 'string' ? String(flags.get('host')) : undefined;
     const apiKey = typeof flags.get('api-key') === 'string' ? String(flags.get('api-key')) : undefined;
@@ -218,8 +225,9 @@ async function main(): Promise<void> {
 
   if (command === 'inspect') {
     const file = needFile(flags);
+    const isDir = statSync(file).isDirectory();
     const entries = await readJsonl(file);
-    console.log(`录制文件: ${file}  共 ${entries.length} 条\n`);
+    console.log(`${isDir ? '录制目录' : '录制文件'}: ${file}  共 ${entries.length} 条\n`);
     for (const e of entries) {
       const kind = e.response.sse
         ? `sse(${e.response.sse.length} chunks, ${(e.response.sse[e.response.sse.length - 1]?.t ?? 0)}ms)`
