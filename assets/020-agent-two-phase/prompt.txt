@@ -1,0 +1,22 @@
+# 阶段 A（planner）
+读取 data.csv，然后只输出一个把该 CSV 转成 markdown 表格的分步执行计划（不超过 4 步，每步一句话）。不要执行任何修改或命令。
+
+# 阶段 B（executor，含阶段 A 实际输出）
+按以下计划执行，完成后展示最终的 markdown 表格：
+
+CSV 内容（`D:/pi-test/staging/agent-two-phase/data.csv`，含 6 行，列名为 name、score）：
+
+| name | score |
+|---|---|
+| alice | 90 |
+| bob | 75 |
+| carol | 88 |
+| dave | 62 |
+| eve | 95 |
+
+以下是把该 CSV 转成 markdown 表格的分步执行计划：
+
+1. 读取 `data.csv`，并按逗号把它切分为表头行和数据行。
+2. 取第一行作为表头，生成分隔行 `| --- | --- |`。
+3. 按列宽把每个数据行（共 5 条记录）格式化，并补齐到统一的 padding 宽度。
+4. 用 `|` 拼接各行，输出最终的 markdown 表格文本。

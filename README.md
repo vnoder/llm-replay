@@ -68,37 +68,53 @@ llm-replay record -p 8787 -u https://api.openai.com -o session.jsonl --api-key s
 | `--api-key <key>` | 透传客户端的 | 覆盖发往上游的 `Authorization: Bearer <key>`。应用端随便填个假 key，真实密钥只留在录制进程 |
 | `--no-log` | | 不打印每条录制日志 |
 
-#### 测试用例库（assets 目录）
+#### 测试用例库（assets 目录，20 个用例）
 
-`assets/` 是**测试用例库**：每个用例一个 `NNN-用途/` 目录，自包含可复现：
+`assets/` 是**测试用例库**：每个用例一个 `NNN-用途/` 目录，自包含可复现
+（README 含用途/测试步骤/回放命令/预期结果，session.jsonl 为回放数据，部分带夹具）：
 
-```
-assets/
-  001-note-qa/            ← 简单文件问答（单工具冒烟）
-    README.md             ← 用途、测试步骤、回放命令、预期结果
-    session.jsonl         ← 回放数据
-    note.txt              ← 夹具
-  002-fix-calc-tools/     ← 代码修复多工具会话（read/edit/bash + 副作用断言）
-    README.md
-    session.jsonl
-    workspace/            ← 夹具（带 bug 的初始工作区）
-```
+| 用例 | 类型 | 覆盖点 |
+|---|---|---|
+| 001-note-qa | agent | 文件问答单工具冒烟（read，hash 可命中） |
+| 002-fix-calc-tools | agent | 多工具代码修复 read/edit/bash + 副作用断言 |
+| 003-chat-casual-zh | API | 中文闲聊单轮非流式 |
+| 004-chat-casual-en-stream | API | 英文闲聊单轮流式 SSE |
+| 005-chat-multi-turn | API | 纯 API 三轮多轮对话（哈希逐轮命中） |
+| 006-chat-reasoner | API | deepseek-reasoner 思维链流式（reasoning_content） |
+| 007-chat-codegen-stream | API | 长代码生成分流式（千级 chunk） |
+| 008-chat-json-mode | API | response_format JSON 结构化输出 |
+| 009-chat-roleplay | API | system 人设角色扮演 |
+| 010-chat-summarize | API | 长文本摘要 |
+| 011-chat-translate | API | 中译英翻译 |
+| 012-chat-cold-facts | API | 低温度短事实问答 |
+| 013-models-list | API | GET /v1/models 非 chat 端点 |
+| 014-error-invalid-model | API | 无效模型 400 错误通道 |
+| 015-chat-fewshot | API | few-shot 情感分类 |
+| 016-agent-grep-find | agent | 代码库检索问答（grep/find/read 只读） |
+| 017-agent-write-file | agent | 从零创建文件并运行（write/bash） |
+| 018-agent-bash-pipeline | agent | bash 文本管道（词频统计） |
+| 019-agent-read-edit-run | agent | 读改跑综合（修复非法 JSON 配置） |
+| 020-agent-two-phase | agent | 两阶段编排 planner→executor（subagent 模式，双 session） |
 
 ```bash
-# 录制新用例：--tag 自动创建 NNN-<tag>/{session.jsonl, README.md 骨架}
-llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag codebase-qa --api-key sk-real-key
-# 录完补齐 README 的「测试步骤 / 预期结果」，并把夹具放进用例目录
-
 # 回放：单用例 或 整库
 llm-replay replay -p 8788 -f assets/002-fix-calc-tools -m sequence
 llm-replay replay -p 8788 -f assets -m sequence       # 按用例序号跨用例连放
 llm-replay inspect -f assets
+
+# 用例库回归验证：逐用例逐轮哈希回放，响应须与录制逐字节一致
+node scripts/verify-cases.mjs
 ```
 
-兼容旧的扁平命名（`NNN.jsonl` / `NNN-含义.jsonl` 与用例目录混用，序号统一续接）。
+批量录制脚本（已入库，可复用/扩展）：
 
-用例类型示例：文件问答冒烟、代码修复多工具、代码库问答、闲聊、subagent 编排——
-按 `--tag` 持续追加即可。
+```bash
+DEEPSEEK_API_KEY=sk-xxx node scripts/record-api-cases.mjs    # API 级批量录制
+DEEPSEEK_API_KEY=sk-xxx node scripts/record-agent-cases.mjs  # pi agent 级批量录制
+```
+
+录制新用例：`llm-replay record -o assets --tag <用途>`，录完补 README 与夹具。
+兼容旧的扁平命名（`NNN.jsonl` / `NNN-含义.jsonl` 与用例目录混用，序号统一续接）。
 
 目录合并后条目 id 带文件前缀（如 `001/rec-000001`），日志与 `x-llm-replay` 响应头可区分来源会话。
 

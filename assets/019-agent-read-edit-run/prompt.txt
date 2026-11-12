@@ -1,0 +1,1 @@
+config.json 目前无法被 JSON.parse。请修复其中的语法错误，并把 port 的值改成数字 8080，最后用 node -e 运行一段脚本验证能成功解析并打印出 port。
