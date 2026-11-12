@@ -1,0 +1,23 @@
+{
+  "name": "llm-replay",
+  "version": "0.1.0",
+  "description": "OpenAI-protocol-compatible LLM record & replay server (zero runtime deps)",
+  "type": "module",
+  "bin": {
+    "llm-replay": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "tsc -p tsconfig.json && node --test dist/test/core.test.js dist/test/e2e.test.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.6.0"
+  }
+}
