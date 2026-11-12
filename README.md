@@ -68,21 +68,37 @@ llm-replay record -p 8787 -u https://api.openai.com -o session.jsonl --api-key s
 | `--api-key <key>` | 透传客户端的 | 覆盖发往上游的 `Authorization: Bearer <key>`。应用端随便填个假 key，真实密钥只留在录制进程 |
 | `--no-log` | | 不打印每条录制日志 |
 
-#### 录制多个会话（assets 目录）
+#### 测试用例库（assets 目录）
+
+`assets/` 是**测试用例库**：每个用例一个 `NNN-用途/` 目录，自包含可复现：
+
+```
+assets/
+  001-note-qa/            ← 简单文件问答（单工具冒烟）
+    README.md             ← 用途、测试步骤、回放命令、预期结果
+    session.jsonl         ← 回放数据
+    note.txt              ← 夹具
+  002-fix-calc-tools/     ← 代码修复多工具会话（read/edit/bash + 副作用断言）
+    README.md
+    session.jsonl
+    workspace/            ← 夹具（带 bug 的初始工作区）
+```
 
 ```bash
-# 每次录制一个会话，输出自动按序号命名；--tag 标注任务含义
-llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag note-qa --api-key sk-real-key
-# …跑第一个会话，Ctrl+C…        → assets/001-note-qa.jsonl
-llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag fix-calc --api-key sk-real-key
-# …跑第二个会话，Ctrl+C…        → assets/002-fix-calc.jsonl
+# 录制新用例：--tag 自动创建 NNN-<tag>/{session.jsonl, README.md 骨架}
+llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag codebase-qa --api-key sk-real-key
+# 录完补齐 README 的「测试步骤 / 预期结果」，并把夹具放进用例目录
 
-# 回放整个目录：按文件名序合并全部 *.jsonl
-#   hash 模式 → 全目录内按哈希命中
-#   sequence 模式 → 跨文件按录制顺序逐条回放（001 会话跑完接 002 会话）
-llm-replay replay -p 8788 -f assets -m sequence
+# 回放：单用例 或 整库
+llm-replay replay -p 8788 -f assets/002-fix-calc-tools -m sequence
+llm-replay replay -p 8788 -f assets -m sequence       # 按用例序号跨用例连放
 llm-replay inspect -f assets
 ```
+
+兼容旧的扁平命名（`NNN.jsonl` / `NNN-含义.jsonl` 与用例目录混用，序号统一续接）。
+
+用例类型示例：文件问答冒烟、代码修复多工具、代码库问答、闲聊、subagent 编排——
+按 `--tag` 持续追加即可。
 
 目录合并后条目 id 带文件前缀（如 `001/rec-000001`），日志与 `x-llm-replay` 响应头可区分来源会话。
 
@@ -195,6 +211,7 @@ demo/
 
 - 回放哈希包含**完整请求 body**：`temperature`、`max_tokens` 等参数变了就匹配不上（可用 `--on-miss proxy` 兜底）。time-sensitive 的字段（如 `user`、时间戳类参数）建议在应用端固定。
 - **多轮 agent 会话请用 `-m sequence`**：LLM 输出本身不可复现（实测 DeepSeek 两次生成的 tool_call ID 与措辞都不同），第二轮起的请求会嵌入模型上一轮的随机输出，哈希必然对不上。sequence 模式忽略请求内容按序回放，实测可完整重放 pi agent 的 read/edit/bash 多轮工具调用对话，且 agent 会真实重执行录制的工具调用（副作用可复现）。
+- **sequence 回放的副作用依赖录制时路径**：模型生成的工具调用常含绝对路径（如 `edit D:/xxx/calc.js`），回放时这些编辑会落到录制时的原路径上；换目录运行对话仍逐字一致，但文件副作用位置不变。用例夹具需在 README 标注录制时的工作路径。
 - 序列模式适合"按剧本跑一遍"的集成测试；哈希模式适合随机顺序的请求。
 - 录制是**追加写**：重复使用同一 `-o` 文件会累积条目；回放时同哈希多条会轮转命中。
 - Windows 提示：Git Bash 下对后台 node 进程发 `kill -INT` 常常无效，会留下占端口的僵尸服务器、甚至两个实例交错写同一 JSONL。录制/回放结束后用 `taskkill /PID <pid> /F`（或任务管理器）确认进程已退出，再进行下一步。

@@ -25,8 +25,10 @@ record 选项:
   -o, --out <path>         录制输出：以 .jsonl 结尾=具体文件；否则视为目录，
                             自动按序号命名（001 起，取目录最大序号+1）。
                             默认 session.jsonl
-      --tag <label>        目录模式下给录制文件加任务含义后缀：NNN-<label>.jsonl
-                            （仅保留字母数字、- 和 _）
+      --tag <label>        目录模式下创建测试用例目录 NNN-<label>/，内含
+                            session.jsonl 与 README.md 骨架（用途/测试步骤/
+                            回放命令，自动填录制日期与上游 host）。
+                            仅保留字母数字、- 和 _
   -p, --port <port>        监听端口（默认 8787，0=随机）
       --host <host>        监听地址（默认 127.0.0.1）
       --api-key <key>      覆盖发往上游的 Authorization: Bearer <key>
@@ -55,10 +57,11 @@ inspect 选项:
   # 录制：应用把 base_url 指到 http://127.0.0.1:8787/v1
   llm-replay record -p 8787 -u https://api.openai.com -o chatgpt.jsonl --api-key sk-real-key
 
-  # 录制多个会话：-o 指向目录，自动按序号命名；--tag 加任务含义
+  # 录制测试用例：--tag 创建用例目录（session.jsonl + README.md 骨架 + 夹具位）
   llm-replay record -p 8787 -u https://api.deepseek.com -o assets --tag fix-calc --api-key sk-real-key
-  #   → assets/001-fix-calc.jsonl、002-<tag>.jsonl / …
-  llm-replay replay -f assets          # 目录整体回放
+  #   → assets/001-fix-calc/{session.jsonl, README.md}
+  llm-replay replay -f assets          # 用例库整体回放
+  llm-replay replay -f assets/001-fix-calc   # 单用例回放
 
   # 回放：哈希匹配 + 原始节奏
   llm-replay replay -f chatgpt.jsonl -p 8788
@@ -170,7 +173,7 @@ async function main(): Promise<void> {
     if (typeof outRaw !== 'string' || outRaw.length === 0) fail(`无效的 -o/--out 参数`);
     const tagRaw = flags.get('tag');
     const tag = typeof tagRaw === 'string' && tagRaw.length > 0 ? tagRaw : undefined;
-    const out = await resolveRecordOut(outRaw, tag);
+    const out = await resolveRecordOut(outRaw, tag, upstream);
     const port = getPort(flags, 8787);
     const host = typeof flags.get('host') === 'string' ? String(flags.get('host')) : undefined;
     const apiKey = typeof flags.get('api-key') === 'string' ? String(flags.get('api-key')) : undefined;

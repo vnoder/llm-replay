@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http, { type Server } from 'node:http';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startRecordServer, type StartedServer } from '../src/server/record-server.js';
@@ -365,20 +365,65 @@ test('resolveRecordOut 序号续接与 .jsonl 直通', async (t) => {
   assert.ok(existsSync(join(dir, 'sub')));
 });
 
-test('resolveRecordOut 带 tag 命名与混合序号续接', async (t) => {
+test('resolveRecordOut 带 tag 创建用例目录与混合序号续接', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'llm-replay-tag-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  // 空目录 + tag → 001-<tag>.jsonl，非法字符被替换
-  const withTag = await resolveRecordOut(dir, 'fix calc/bug!');
-  assert.ok(withTag.endsWith('001-fix-calc-bug.jsonl'), `应为 001-fix-calc-bug.jsonl，得到 ${withTag}`);
+  // 空目录 + tag → 用例目录 001-<tag>/session.jsonl + README 骨架，非法字符被替换
+  const withTag = await resolveRecordOut(dir, 'fix calc/bug!', 'https://api.deepseek.com');
+  assert.ok(withTag.endsWith(join('001-fix-calc-bug', 'session.jsonl')), `应为 001-fix-calc-bug/session.jsonl，得到 ${withTag}`);
+  assert.ok(existsSync(join(dir, '001-fix-calc-bug', 'README.md')), '应生成 README.md 骨架');
+  const readme = readFileSync(join(dir, '001-fix-calc-bug', 'README.md'), 'utf8');
+  assert.ok(readme.includes('001-fix-calc-bug') && readme.includes('api.deepseek.com'), 'README 应含用例名与上游 host');
 
-  // 目录里已有 002-xxx.jsonl（带含义）与 005.jsonl → 续接到 006
+  // 目录里已有 002-xxx.jsonl（扁平带含义）与 005-yyy/（用例目录）→ 续接到 006
   writeFileSync(join(dir, '002-note-qa.jsonl'), '{}\n');
-  writeFileSync(join(dir, '005.jsonl'), '{}\n');
+  mkdirSync(join(dir, '005-codebase-qa'));
   const next = await resolveRecordOut(dir);
   assert.ok(next.endsWith('006.jsonl'), `应续接到 006，得到 ${next}`);
-  // 只计算名字不创建文件 → 下一次仍是 006，但带 tag 后缀
   const nextTagged = await resolveRecordOut(dir, 'embed');
-  assert.ok(nextTagged.endsWith('006-embed.jsonl'), `应为 006-embed.jsonl，得到 ${nextTagged}`);
+  assert.ok(nextTagged.endsWith(join('006-embed', 'session.jsonl')), `应为 006-embed/session.jsonl，得到 ${nextTagged}`);
+});
+
+test('用例目录录制 -> 用例库整体回放', async (t) => {
+  const upstream = await startFakeUpstream();
+  t.after(() => upstream.close());
+  const root = mkdtempSync(join(tmpdir(), 'llm-replay-cases-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const auth = { authorization: `Bearer ${REAL_KEY}`, 'content-type': 'application/json' };
+
+  // 用例 1（用例目录）：录制 models
+  const case1 = await resolveRecordOut(root, 'case-one', `http://127.0.0.1:${upstream.port}`);
+  const rec1 = await startRecordServer({ port: 0, upstream: `http://127.0.0.1:${upstream.port}`, file: case1, log: false });
+  t.after(() => rec1.close());
+  await (await req(rec1.port, '/v1/models', { headers: auth })).json();
+  await rec1.close();
+
+  // 用例 2（扁平文件）：录制 embeddings —— 用例库允许混用
+  const flat = await resolveRecordOut(root);
+  const rec2 = await startRecordServer({ port: 0, upstream: `http://127.0.0.1:${upstream.port}`, file: flat, log: false });
+  t.after(() => rec2.close());
+  await (await req(rec2.port, '/v1/embeddings', { method: 'POST', headers: auth, body: JSON.stringify({ model: 'e', input: 'x' }) })).json();
+  await rec2.close();
+
+  // 用例库整体读取：用例目录（前缀=用例名）+ 扁平文件（前缀=文件名）按名称序合并
+  const entries = await readJsonl(root);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].id.startsWith('001-case-one/'), true);
+  assert.equal(entries[0].request.path, '/v1/models');
+  assert.equal(entries[1].id.startsWith('002/'), true);
+  assert.equal(entries[1].request.path, '/v1/embeddings');
+
+  // 单用例回放 与 用例库整体回放
+  const one = await startReplayServer({ port: 0, file: join(root, '001-case-one'), match: 'sequence', log: false });
+  t.after(() => one.close());
+  assert.equal((await jsonOf(await req(one.port, '/x'))).data[0].id, 'gpt-test');
+  await one.close();
+
+  const all = await startReplayServer({ port: 0, file: root, match: 'sequence', pace: 'instant', log: false });
+  t.after(() => all.close());
+  assert.equal((await jsonOf(await req(all.port, '/x'))).data[0].id, 'gpt-test');
+  assert.deepEqual((await jsonOf(await req(all.port, '/x', { method: 'POST', body: 'q' }))).data[0].embedding, [0.1, 0.2]);
+  assert.equal((await req(all.port, '/x')).status, 404, '两条放完应 404');
+  await all.close();
 });
